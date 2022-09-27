@@ -1,0 +1,368 @@
+"use strict";
+/*START---获取项目根路径*/
+var $ctx = "";
+try {
+  $ctx = window.location.href.substring(
+      window.location.href.indexOf(window.location.hostname) + window.location.hostname.length,
+      window.location.href.indexOf('/res/'));
+}catch (e){}
+/*END---获取项目根路径*/
+var app = new Vue({
+  el: '#app',
+  data: function data() {
+    return {
+      isLogin: false,
+      // 是否已经登陆
+      noticesList: [],
+      // 普通通知列表
+      topNoticesList: [],
+      //  置顶通知列表
+      lastValue: '',
+      lastPage: 0,
+
+      /* start 左滑菜单手势变量*/
+      startX: 0,
+      //触摸位置
+      endX: 0,
+      //结束位置
+      moveX: 0,
+      //滑动时的位置
+      disX: 0,
+      //移动距离
+      currentDom: null,
+      //当前点击dom
+      currentDomIndex1: -1,
+      // 当前点击第几个一级标签下
+      startY: 0,
+      //触摸位置
+      endY: 0,
+      //结束位置
+      moveY: 0,
+      //滑动时的位置
+      removeIsShow: false,
+      //删除按钮是否显示出来
+      gesture: 0,
+      //默认点击手势 1为左右滑动手势
+      locked1: false,
+      //有一个漏出来其他的不能左右滑动
+      addSpanIndex: -1 //点击的是第几个一级标签
+
+      /* end  */
+
+    };
+  },
+  created: function created() {
+    this.isLogin = getCookie('UID');
+    isEnterLogin(this.isLogin);
+    this.getMyNotice({
+      type: 1
+    });
+  },
+  mounted: function mounted() {},
+  methods: {
+    // 获取我发出的列表
+    getMyNotice: thorottle(function (params) {
+      var url = $ctx+'/mobile/notice/getNoticeList';
+      axios.get(url, {
+        params: params
+      }).then(function (res) {
+        var data = res.data;
+
+        if (data.status) {
+          app.topNoticesList = data.topNotices || [];
+
+          if (data.notices) {
+            app.lastValue = data.notices.lastGetId || '';
+            app.lastPage = data.notices.lastPage || 0;
+
+            for (var i = 0; i < data.notices.list.length; i++) {
+              app.noticesList.push(data.notices.list[i]);
+            }
+          }
+        } else {
+          alert('请求失败');
+        }
+      });
+    }, 1000, true),
+    // 清空
+    clear: function clear() {
+      var list = this.topNoticesList.concat(this.noticesList);
+      var noticeIds = [];
+
+      for (var i = 0; i < list.length; i++) {
+        noticeIds.push(list[i].idCode);
+      }
+
+      this.noticeDelete({
+        sendTag: 1,
+        noticeIds: noticeIds.join(',')
+      });
+    },
+    // 通知置顶或取消置顶
+    oprationTop: function oprationTop(index, top, idCode) {
+      var _this = this;
+
+      var url = $ctx+"/mobile/notice/".concat(idCode, "/topNotice");
+      axios.get(url, {
+        params: {
+          top: top === 1 ? 0 : 1
+        }
+      }).then(function (res) {
+        var data = res.data;
+
+        if (data.status) {
+          if (top === 1) {
+            // 取消置顶
+            _this.topNoticesList[index].top = 0; // 修改top状态
+
+            _this.noticesList.unshift(_this.topNoticesList.splice(index, 1)[0]); // 从置顶列表里删除并加到普通列表
+
+          } else {
+            // 置顶
+            var noticeListIndex = index - _this.topNoticesList.length;
+            _this.noticesList[noticeListIndex].top = 1; // top状态修改
+
+            _this.topNoticesList.unshift(_this.noticesList.splice(noticeListIndex, 1)[0]); // 从普通列表里删除并加到置顶列表
+
+          }
+
+          _this.$forceUpdate();
+        } else {
+          alert('操作失败', data.msg);
+        }
+      });
+    },
+    // 撤回
+    revocation: function revocation(params) {
+      var url = $ctx+'/mobile/notice/RecallNotice';
+      axios.get(url, {
+        params: params
+      }).then(function (res) {
+        var data = res.data;
+
+        if (data.status) {
+          window.location.reload();
+        }
+      });
+    },
+    // 删除
+    noticeDelete: thorottle(function (params) {
+      var url = $ctx+'/mobile/notice/delNoitce';
+      axios.get(url, {
+        params: params
+      }).then(function (res) {
+        var data = res.data;
+
+        if (data.status) {
+          var noticeIds = params.noticeIds.split(',');
+
+          for (var i = 0; i < app.noticesList.length; i++) {
+            for (var j = 0; j < noticeIds.length; j++) {
+              if (app.noticesList[i].idCode === noticeIds[j]) {
+                app.noticesList.splice(i, 1);
+              }
+
+              if (app.topNoticesList[i]) {
+                if (app.topNoticesList[i].idCode === noticeIds[j]) {
+                  app.topNoticesList.splice(i, 1);
+                }
+              }
+            }
+          }
+
+          app.$forceUpdate();
+        } else {
+          alert('删除失败', data.msg);
+        }
+      });
+    }, 1000, true),
+    // 监听滚动是否到底
+    scrollGet: function scrollGet(e) {
+      var scrollHeight = e.target.scrollHeight;
+      var scrollTop = e.target.scrollTop;
+      var clientHeight = e.target.clientHeight;
+      var difference = scrollHeight - (scrollTop + clientHeight);
+
+      if (difference < 30) {
+        if (this.lastPage !== 1) {
+          this.getMyNotice({
+            type: 1,
+            lastValue: this.lastValue
+          });
+        }
+      }
+    },
+    // 进入某个页面
+    enter: function enter(url) {
+      window.location.href = url;
+    },
+    // 返回
+    back: function back() {
+      window.history.go(-1);
+    },
+    // start 左滑菜单  (๑•̀ㅂ•́)و✧ w(ﾟДﾟ)w ***传奇大佬力作!!!!!!*** >_< ヽ(✿ﾟ▽ﾟ)ノ
+    touchStart: function touchStart(ev, index1) {
+      ev = ev || event;
+      this.currentDom = ev.currentTarget;
+
+      if (this.currentDomIndex1 === index1) {//点的还是自己
+      } else {
+        //点的和上次不是同一个
+        if (this.removeIsShow) {
+          this.locked1 = true;
+        }
+
+        this.restSlide(this.currentDom);
+      } //tounches类数组，等于1时表示此时有只有一只手指在触摸屏幕
+
+
+      if (ev.touches.length == 1) {
+        // 记录开始位置
+        this.startX = ev.touches[0].clientX;
+        this.startY = ev.touches[0].clientY;
+      }
+    },
+    touchMove: function touchMove(ev, index) {
+      ev = ev || event; //this.currentDom = ev.currentTarget;
+      //获取删除按钮和编辑的宽度，此宽度为滑块左滑的最大距离
+
+      var wd = this.$refs.slide[index].offsetWidth;
+
+      if (!this.locked1) {
+        // 滑动时距离浏览器左侧实时距离
+        this.moveY = ev.touches[0].clientY;
+        this.moveX = ev.touches[0].clientX;
+        var angle = Math.atan2(Math.abs(this.moveY - this.startY), Math.abs(this.moveX - this.startX)) * 180 / Math.PI; //判断手势角度是否大于50%
+
+        if (angle >= 45) {
+          this.gesture = 2;
+        } else if (angle < 45) {
+          //起始位置减去 实时的滑动的距离，得到手指实时偏移距离
+          this.disX = this.startX - this.moveX; // 区分出左滑和右滑动
+
+          if (this.disX > 0) {
+            //说明左滑
+            this.gesture = 1; //左右滑动
+
+            if (!this.removeIsShow) {
+              //删除按钮不显示
+              if (this.disX >= wd) {
+                //滑动距离大于按钮宽度则，左移距离为按钮宽度
+                var l = wd;
+                this.currentDom.style = "transform:translateX(-" + l + "px)";
+                this.removeIsShow = true;
+              } else {
+                this.currentDom.style = "transform:translateX(-" + this.disX + "px)";
+              }
+            } else {//说明此时删除按钮显示出来,左滑不必要执行操作
+            }
+          } else if (this.disX <= 0) {
+            //说明右滑
+            this.gesture = 1; //左右滑动
+
+            if (!this.removeIsShow) {//删除按钮不显示，右滑动也没必要执行
+            } else {
+              //说明此时删除按钮显示出来，右滑动慢慢关闭
+              if (Math.abs(this.disX) >= wd) {
+                //滑动距离大于按钮宽度则，左移距离为按钮宽度
+                var l = 0;
+                this.currentDom.style = "transform:translateX(-" + l + "px)";
+                this.removeIsShow = false;
+              } else {
+                var l = wd - Math.abs(this.disX);
+                this.currentDom.style = "transform:translateX(-" + l + "px)";
+              }
+            }
+          }
+        }
+      }
+    },
+    touchEnd: function touchEnd(ev, index) {
+      ev = ev || event;
+      var wd = this.$refs.slide[index].offsetWidth;
+
+      if (this.gesture === 1) {
+        //左右滑动手势
+        if (this.disX >= 0 && this.disX >= wd / 2 && this.disX < wd && !this.removeIsShow) {
+          var l = wd;
+          this.currentDom.style = "transform:translateX(-" + l + "px)";
+          this.removeIsShow = true;
+        } else if (this.disX >= 0 && this.disX >= wd && !this.removeIsShow) {
+          var l = wd;
+          this.currentDom.style = "transform:translateX(-" + l + "px)";
+          this.removeIsShow = true;
+        } else if (this.disX >= 0 && this.disX < wd / 2 && !this.removeIsShow) {
+          var l = 0;
+          this.currentDom.style = "transform:translateX(-" + l + "px)";
+          this.removeIsShow = false;
+        } else if (this.disX >= 0 && this.removeIsShow) {//左滑动 且显示出删除按钮 不执行操作
+        } else if (this.disX <= 0 && !this.removeIsShow) {//右滑动 且未显示出删除按钮
+        } else if (this.disX <= 0 && Math.abs(this.disX) >= wd / 2 && Math.abs(this.disX) < wd && this.removeIsShow) {
+          //右滑动超过一半 显示出删除按钮了
+          var l = 0;
+          this.currentDom.style = "transform:translateX(-" + l + "px)";
+          this.removeIsShow = false;
+        } else if (this.disX <= 0 && Math.abs(this.disX) >= wd && this.removeIsShow) {
+          //右滑动超过一半 显示出删除按钮了
+          var l = 0;
+          this.currentDom.style = "transform:translateX(-" + l + "px)";
+          this.removeIsShow = false;
+        } else if (this.disX <= 0 && this.removeIsShow && Math.abs(this.disX) < wd / 2) {
+          //右滑小于一半 显示出删除按钮了
+          var l = wd;
+          this.currentDom.style = "transform:translateX(-" + l + "px)";
+          this.removeIsShow = true;
+        }
+      } else if (this.gesture === 2) {
+        this.restSlide(this.currentDom); //单击将所有的删除全部影藏
+        //说明上下滑动
+
+        this.currentDom.style = "transform:translateX(0)";
+        this.removeIsShow = false;
+        this.locked1 = false;
+      } else if (this.gesture === 0) {
+        this.restSlide(this.currentDom); //单击将所有的删除全部影藏
+        //说明只是单击
+        //this.editorSpan(title, uuid)
+
+        this.currentDom.style = "transform:translateX(0)";
+        this.removeIsShow = false;
+        this.locked1 = false;
+      }
+
+      this.gesture = 0; //解放手势
+
+      this.currentDomIndex1 = index;
+      this.startX = 0; //触摸位置
+
+      this.endX = 0; //结束位置
+
+      this.moveX = 0; //滑动时的位置
+
+      this.disX = 0; //移动距离
+
+      this.startY = 0; //触摸位置
+
+      this.endY = 0; //结束位置
+
+      this.moveY = 0; //滑动时的位置
+    },
+
+    /*重置每个slide*/
+    restSlide: function restSlide(dom) {
+      var listItems = document.querySelectorAll('.slide'); // 复位
+
+      for (var i = 0; i < listItems.length; i++) {
+        if (dom == listItems[i]) {//找到当前点的dom
+        } else {
+          //其他重置
+          listItems[i].style = "transform:translateX(0)";
+        }
+      } //只要不是点自己，删除按钮都是影藏起来的
+
+
+      this.removeIsShow = false; //删除按钮是否显示出来;
+    } // end  左滑菜单 :.ﾟヽ(｡◕‿◕｡)ﾉﾟ.:
+
+  }
+});
